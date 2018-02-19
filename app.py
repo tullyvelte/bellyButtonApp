@@ -1,6 +1,6 @@
 # Import dependencies
 from flask import Flask, render_template, jsonify, request, redirect
-from routes import session, Samples, OTU, Samples_meta
+from routes import session, Sample, OTU, Samples_meta
 
 #################################################
 # Flask Setup
@@ -20,14 +20,14 @@ def home():
 # Names Route - return list of names
 @app.route('/names')
 def names():
-    sample_names = Samples.__table__.columns.keys()
+    sample_names = Sample.__table__.columns.keys()
     del sample_names[0]
     return jsonify(sample_names)
 
 # OTU route - return list of descriptions
 @app.route('/otu')
 def otu():
-    otu_desc = session.query(Samples_otu.lowest_taxonomic_unit_found).all()
+    otu_desc = session.query(Sample_otu.lowest_taxonomic_unit_found).all()
 
     otu_desc_list = []
 
@@ -89,5 +89,7 @@ def samples(sample):
     return jsonify(sample_dict)
 
 if __name__ == "__main__":
+    app.jinja_env.auto_reload = True
+    app.config['TEMPLATES_AUTO_RELOAD'] = True
     app.run(debug=True)
 
