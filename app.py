@@ -1,95 +1,94 @@
-# Import dependencies
-from flask import Flask, render_template, jsonify, request, redirect
-from routes import session, Sample, OTU, Samples_meta
+# import necessary libraries
+import numpy as np
+import pandas as pd
 
-#################################################
-# Flask Setup
-#################################################
+from sqlalchemy.ext.automap import automap_base
+from sqlalchemy.orm import Session
+from sqlalchemy import create_engine, func
 
+from flask import (
+    Flask,
+    render_template,
+    jsonify,
+    request,
+    redirect)
+
+# create instance of Flask app
 app = Flask(__name__)
 
-#################################################
-# Routes
-#################################################
+# setup database
+engine = create_engine("sqlite:///db/belly_button_biodiversity.sqlite", echo=False)
 
-# Main route
-@app.route('/')
+Base = automap_base()
+Base.prepare(engine, reflect=True)
+Sample = Base.classes.samples
+OTU = Base.classes.otu
+Metadata = Base.classes.samples_metadata
+
+
+session = Session(engine)
+
+# create route that renders index.html template
+@app.route("/")
 def home():
-    return render_template('index.html')
+    return render_template("index.html")
 
-# Names Route - return list of names
 @app.route('/names')
 def names():
-    sample_names = Sample.__table__.columns.keys()
-    del sample_names[0]
-    return jsonify(sample_names)
+    all_samples = session.query(Sample).statement
+    all_samples_df = pd.read_sql_query(all_samples, session.bind)
+    all_samples_df.set_index('otu_id', inplace=True)
+    return jsonify(list(all_samples_df.columns))
 
-# OTU route - return list of descriptions
 @app.route('/otu')
 def otu():
-    otu_desc = session.query(Sample_otu.lowest_taxonomic_unit_found).all()
+    all_otus = session.query(OTU).statement
+    all_otus_df = pd.read_sql_query(all_otus, session.bind)
+    all_otus_df.set_index('otu_id', inplace=True)
+    return jsonify(list(all_otus_df["lowest_taxonomic_unit_found"]))
 
-    otu_desc_list = []
-
-    for each in otu_query:
-        otu_desc_list.append(each[0])
-    return jsonify(otu_desc_list)
-
-# Sample_meta route - return a dictionary of metadata
 @app.route('/metadata/<sample>')
 def metadata(sample):
-    sample = sample.lstrip('BB_')
-    
-    meta_data = (session
-                .query(Sample_meta)
-                .filter(Sample_meta.SAMPLEID == sample))
-    
-    for result in meta_data:
-        metadata_dict = {
-            "AGE": result.AGE,
-            "BBTYPE": result.BBTYPE,
-            "ETHNICITY": result.ETHNICITY,
-            "GENDER": result.GENDER,
-            "LOCATION": result.LOCATION,
-            "SAMPLEID": result.SAMPLEID,
-        }
-        
-    return jsonify(metadata_dict)
+    all_samples_metadata = session.query(Metadata).statement
+    all_samples_metadata_df = pd.read_sql_query(all_samples_metadata, session.bind)
+    sample_num = int(sample.split("_")[1])
+    selected_sample = all_samples_metadata_df.loc[all_samples_metadata_df["SAMPLEID"] == sample_num, :]
+    json_selected_sample = selected_sample.to_json(orient='records')
+    return json_selected_sample
 
-# Wash Frequency Route - return a value as number
 @app.route('/wfreq/<sample>')
 def wfreq(sample):
-    sample = sample.lstrip('BB_')
-    
-    wfreq_query = (session
-                  .query(Sample_meta.WFREQ)
-                  .filter(Sample_meta.SAMPLEID == sample).all())
-    
-    wfreq_query_results = []
-    for result in results:
-        wfreq_results = {}
-        wfreq_results[sample] = int(result[0])
-        wfreq_query_results.append(wfreq_results)
-        
-    return jsonify(wfreq_results)
+    all_samples_metadata = session.query(Metadata).statement
+    all_samples_metadata_df = pd.read_sql_query(all_samples_metadata, session.bind)
+    sample_num = int(sample.split("_")[1])
+    selected_sample = all_samples_metadata_df.loc[all_samples_metadata_df["SAMPLEID"] == sample_num, :]
+    wfreq = selected_sample["WFREQ"].values[0]
+    return f"{wfreq}"
 
-# OTU ID/Values route - return dictionary of OTU ids and values(DESC order)
 @app.route('/samples/<sample>')
 def samples(sample):
-    
-    sample_query = session.query(Sample.otu_id, getattr(Sample, sample))
-    
-    sample_query = sorted(sample_query, key=lambda x: x[1], reverse=True)
-    
-    sample_dict = {
-        "OTU_ids": [otu[0] for otu in sample_query],
-        "sample_values": [otu[1] for otu in sample_query]
-    }
-    
-    return jsonify(sample_dict)
+    all_otus = session.query(OTU).statement
+    all_otus_df = pd.read_sql_query(all_otus, session.bind)
+    all_otus_df.set_index('otu_id', inplace=True)
+
+    all_samples = session.query(Sample).statement
+    all_samples_df = pd.read_sql_query(all_samples, session.bind)
+    selected_sample = all_samples_df[sample]
+    otu_ids = all_samples_df['otu_id']
+    selection_df = pd.DataFrame({
+        "otu_ids":otu_ids,
+        "samples":selected_sample
+    })
+    sorted_df = selection_df.sort_values(by=['samples'], ascending=False)
+    sorted_otus = {"otu_ids": list(sorted_df['otu_ids'].values)}
+    sorted_samples = {"sample_values": list(sorted_df['samples'].values)}
+    for i in range(len(sorted_otus["otu_ids"])):
+        sorted_otus["otu_ids"][i] = int(sorted_otus["otu_ids"][i])
+    for i in range(len(sorted_samples["sample_values"])):
+        sorted_samples["sample_values"][i] = int(sorted_samples["sample_values"][i])
+    results = [sorted_otus, sorted_samples, list(all_otus_df["lowest_taxonomic_unit_found"])]
+    return jsonify(results)
+
 
 if __name__ == "__main__":
-    app.jinja_env.auto_reload = True
-    app.config['TEMPLATES_AUTO_RELOAD'] = True
     app.run(debug=True)
-
